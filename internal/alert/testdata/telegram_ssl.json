@@ -1,0 +1,5 @@
+{
+  "chat_id": "-100123456789",
+  "text": "Acme Homepage (https://acme.example.com) SSL certificate expires in 9 day(s) (2026-03-24)\nRenew the certificate soon to avoid an outage.",
+  "parse_mode": "Markdown"
+}

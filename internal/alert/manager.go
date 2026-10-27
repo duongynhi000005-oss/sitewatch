@@ -41,6 +41,13 @@ func NewManager(cfg config.Alerts) *Manager {
 			To:       cfg.Email.To,
 		})
 	}
+	if cfg.Telegram != nil {
+		notifiers = append(notifiers, &TelegramNotifier{
+			BotToken: cfg.Telegram.BotToken(),
+			ChatID:   cfg.Telegram.ChatID,
+			Client:   client,
+		})
+	}
 
 	return &Manager{Notifiers: notifiers}
 }

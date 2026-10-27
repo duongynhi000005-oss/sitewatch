@@ -94,6 +94,9 @@ alerts:
     from: "alerts@example.com"
     to: ["oncall@example.com"]
     password_env: "SITEWATCH_SMTP_PASSWORD"   # read at runtime; never in this file
+  telegram:
+    bot_token_env: "SITEWATCH_TELEGRAM_BOT_TOKEN"  # read at runtime; never in this file
+    chat_id: "-100123456789"
 
 history:
   path: "sitewatch_history.jsonl"
@@ -155,6 +158,13 @@ before starting sitewatch:
 
 ```sh
 export SITEWATCH_SMTP_PASSWORD="an app password, not your account password"
+./sitewatch run
+```
+
+**Telegram** — create a bot via [@BotFather](https://t.me/BotFather) to obtain a bot token, add the bot to your channel/group to get the `chat_id`, then name the environment variable in `alerts.telegram`:
+
+```sh
+export SITEWATCH_TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 ./sitewatch run
 ```
 

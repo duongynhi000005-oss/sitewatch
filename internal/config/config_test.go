@@ -350,3 +350,77 @@ func TestEmailAlert_PasswordFromEnv(t *testing.T) {
 		t.Errorf("expected empty password when password_env unset, got %q", got)
 	}
 }
+
+func TestParse_TelegramAlertValid(t *testing.T) {
+	data := []byte(`
+alerts:
+  telegram:
+    bot_token_env: "SITEWATCH_TG_TOKEN"
+    chat_id: "-100123456789"
+checks:
+  - name: Example
+    url: https://example.com
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Alerts.Telegram == nil {
+		t.Fatal("expected alerts.telegram to be non-nil")
+	}
+	if cfg.Alerts.Telegram.BotTokenEnv != "SITEWATCH_TG_TOKEN" {
+		t.Errorf("expected bot_token_env SITEWATCH_TG_TOKEN, got %q", cfg.Alerts.Telegram.BotTokenEnv)
+	}
+	if cfg.Alerts.Telegram.ChatID != "-100123456789" {
+		t.Errorf("expected chat_id -100123456789, got %q", cfg.Alerts.Telegram.ChatID)
+	}
+}
+
+func TestParse_TelegramAlertRequiresBotTokenEnv(t *testing.T) {
+	data := []byte(`
+alerts:
+  telegram:
+    chat_id: "-100123456789"
+checks:
+  - name: Example
+    url: https://example.com
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error when bot_token_env is omitted")
+	}
+	if !strings.Contains(err.Error(), "alerts.telegram.bot_token_env") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_TelegramAlertRequiresChatID(t *testing.T) {
+	data := []byte(`
+alerts:
+  telegram:
+    bot_token_env: "SITEWATCH_TG_TOKEN"
+checks:
+  - name: Example
+    url: https://example.com
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error when chat_id is omitted")
+	}
+	if !strings.Contains(err.Error(), "alerts.telegram.chat_id") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestTelegramAlert_TokenFromEnv(t *testing.T) {
+	const envKey = "TEST_TG_TOKEN_ENV_12345"
+	t.Setenv(envKey, "my-secret-tg-token")
+	tg := TelegramAlert{BotTokenEnv: envKey}
+	if got := tg.BotToken(); got != "my-secret-tg-token" {
+		t.Errorf("expected 'my-secret-tg-token', got %q", got)
+	}
+	tgEmpty := TelegramAlert{}
+	if got := tgEmpty.BotToken(); got != "" {
+		t.Errorf("expected '', got %q", got)
+	}
+}

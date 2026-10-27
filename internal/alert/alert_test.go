@@ -301,3 +301,79 @@ func TestEmailNotifier_Notify_PropagatesSendError(t *testing.T) {
 		t.Fatal("expected error to propagate from smtp send")
 	}
 }
+
+func TestTelegramPayload_Down_Golden(t *testing.T) {
+	goldenJSON(t, "telegram_down.json", BuildTelegramPayload("-100123456789", fixedEvent(Down)))
+}
+
+func TestTelegramPayload_Up_Golden(t *testing.T) {
+	goldenJSON(t, "telegram_up.json", BuildTelegramPayload("-100123456789", fixedEvent(Up)))
+}
+
+func TestTelegramPayload_SSLExpiry_Golden(t *testing.T) {
+	goldenJSON(t, "telegram_ssl.json", BuildTelegramPayload("-100123456789", fixedEvent(SSLExpiry)))
+}
+
+func TestTelegramNotifier_Notify_PostsJSON(t *testing.T) {
+	var (
+		gotPath        string
+		gotMethod      string
+		gotContentType string
+		gotBody        []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = buf
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	n := &TelegramNotifier{
+		BotToken: "test-bot-token",
+		ChatID:   "-100123456789",
+		BaseURL:  srv.URL,
+		Client:   srv.Client(),
+	}
+	if err := n.Notify(context.Background(), fixedEvent(Down)); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", gotMethod)
+	}
+	if gotPath != "/bottest-bot-token/sendMessage" {
+		t.Errorf("expected /bottest-bot-token/sendMessage, got %s", gotPath)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("expected application/json content type, got %q", gotContentType)
+	}
+	var payload TelegramPayload
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("server received invalid JSON: %v (%s)", err, gotBody)
+	}
+	if payload.ChatID != "-100123456789" {
+		t.Errorf("expected chat_id '-100123456789', got %q", payload.ChatID)
+	}
+	if payload.ParseMode != "Markdown" {
+		t.Errorf("expected parse_mode 'Markdown', got %q", payload.ParseMode)
+	}
+}
+
+func TestTelegramNotifier_Notify_ErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	n := &TelegramNotifier{
+		BotToken: "bad-token",
+		ChatID:   "-100123456789",
+		BaseURL:  srv.URL,
+		Client:   srv.Client(),
+	}
+	if err := n.Notify(context.Background(), fixedEvent(Down)); err == nil {
+		t.Fatal("expected an error for a non-2xx response")
+	}
+}

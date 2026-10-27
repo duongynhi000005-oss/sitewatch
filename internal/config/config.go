@@ -56,13 +56,29 @@ func (e EmailAlert) Password() string {
 	return os.Getenv(e.PasswordEnv)
 }
 
+// TelegramAlert configures a Telegram bot incoming alert channel.
+type TelegramAlert struct {
+	BotTokenEnv string `yaml:"bot_token_env"`
+	ChatID      string `yaml:"chat_id"`
+}
+
+// BotToken reads the bot token from the environment variable named by
+// BotTokenEnv. It returns "" if BotTokenEnv is empty or unset.
+func (t TelegramAlert) BotToken() string {
+	if t.BotTokenEnv == "" {
+		return ""
+	}
+	return os.Getenv(t.BotTokenEnv)
+}
+
 // Alerts groups every configured alert channel. Channels left as their zero
 // value are simply not used.
 type Alerts struct {
-	Discord *DiscordAlert `yaml:"discord"`
-	Slack   *SlackAlert   `yaml:"slack"`
-	Webhook *WebhookAlert `yaml:"webhook"`
-	Email   *EmailAlert   `yaml:"email"`
+	Discord  *DiscordAlert  `yaml:"discord"`
+	Slack    *SlackAlert    `yaml:"slack"`
+	Webhook  *WebhookAlert  `yaml:"webhook"`
+	Email    *EmailAlert    `yaml:"email"`
+	Telegram *TelegramAlert `yaml:"telegram"`
 }
 
 // History configures the append-only JSONL history file.
@@ -314,6 +330,22 @@ func validate(cfg *Config, doc *yaml.Node) ValidationErrors {
 				Path:    "alerts.email.password_env",
 				Line:    lineOf(doc, "alerts", "email"),
 				Message: "is required; sitewatch never stores SMTP passwords in the config file, so name the environment variable to read it from",
+			})
+		}
+	}
+	if tg := cfg.Alerts.Telegram; tg != nil {
+		if strings.TrimSpace(tg.BotTokenEnv) == "" {
+			errs = append(errs, FieldError{
+				Path:    "alerts.telegram.bot_token_env",
+				Line:    lineOf(doc, "alerts", "telegram"),
+				Message: "is required; sitewatch never stores bot tokens in the config file, so name the environment variable to read it from",
+			})
+		}
+		if strings.TrimSpace(tg.ChatID) == "" {
+			errs = append(errs, FieldError{
+				Path:    "alerts.telegram.chat_id",
+				Line:    lineOf(doc, "alerts", "telegram", "chat_id"),
+				Message: "is required when alerts.telegram is configured",
 			})
 		}
 	}
