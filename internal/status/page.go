@@ -102,7 +102,7 @@ func BuildPageData(cfg *config.Config, records []history.Record, now time.Time) 
 
 		cs := CheckStatus{
 			Name:               chk.Name,
-			URL:                chk.URL,
+			URL:                chk.Target(),
 			State:              "UNKNOWN",
 			StateClass:         "unknown",
 			LastCheckedDisplay: "never",

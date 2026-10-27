@@ -13,6 +13,7 @@ import (
 
 	"github.com/Ricky1800/sitewatch/internal/checker"
 	"github.com/Ricky1800/sitewatch/internal/config"
+	"github.com/Ricky1800/sitewatch/internal/dnschecker"
 )
 
 // RunCheck implements `sitewatch check`: a one-shot run over every
@@ -62,6 +63,7 @@ func RunCheck(args []string, stdout, stderr io.Writer) int {
 // in the same order as cfg.Checks.
 func runAllChecks(cfg *config.Config) []checker.Result {
 	c := &checker.Checker{Client: &http.Client{}}
+	dns := &dnschecker.Checker{}
 	results := make([]checker.Result, len(cfg.Checks))
 
 	var wg sync.WaitGroup
@@ -69,7 +71,11 @@ func runAllChecks(cfg *config.Config) []checker.Result {
 		wg.Add(1)
 		go func(i int, chk config.Check) {
 			defer wg.Done()
-			results[i] = c.Check(context.Background(), chk)
+			if chk.Type == "dns" {
+				results[i] = dns.Check(context.Background(), chk)
+			} else {
+				results[i] = c.Check(context.Background(), chk)
+			}
 		}(i, chk)
 	}
 	wg.Wait()

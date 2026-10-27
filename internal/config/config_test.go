@@ -350,3 +350,105 @@ func TestEmailAlert_PasswordFromEnv(t *testing.T) {
 		t.Errorf("expected empty password when password_env unset, got %q", got)
 	}
 }
+
+func TestParse_DNSCheckValid(t *testing.T) {
+	data := []byte(`
+checks:
+  - name: "Acme Plumbing — DNS"
+    type: dns
+    host: "acmeplumbing.example.com"
+    expected_ip: "203.0.113.10"
+    record_type: A
+    interval: 5m
+    timeout: 5s
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Checks) != 1 {
+		t.Fatalf("expected 1 check, got %d", len(cfg.Checks))
+	}
+	c := cfg.Checks[0]
+	if c.Type != "dns" {
+		t.Errorf("expected type dns, got %q", c.Type)
+	}
+	if c.Host != "acmeplumbing.example.com" {
+		t.Errorf("expected host acmeplumbing.example.com, got %q", c.Host)
+	}
+	if c.ExpectedIP != "203.0.113.10" {
+		t.Errorf("expected expected_ip 203.0.113.10, got %q", c.ExpectedIP)
+	}
+	if c.RecordType != "A" {
+		t.Errorf("expected record_type A, got %q", c.RecordType)
+	}
+	if c.Target() != "acmeplumbing.example.com" {
+		t.Errorf("expected Target() acmeplumbing.example.com, got %q", c.Target())
+	}
+}
+
+func TestParse_DNSCheckMissingHost(t *testing.T) {
+	data := []byte(`
+checks:
+  - name: "Acme DNS"
+    type: dns
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error for missing host")
+	}
+	if !strings.Contains(err.Error(), "is required for dns checks") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_DNSCheckInvalidRecordType(t *testing.T) {
+	data := []byte(`
+checks:
+  - name: "Acme DNS"
+    type: dns
+    host: "example.com"
+    record_type: "TXT"
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error for invalid record_type")
+	}
+	if !strings.Contains(err.Error(), "invalid record_type") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_DNSCheckInvalidExpectedIP(t *testing.T) {
+	data := []byte(`
+checks:
+  - name: "Acme DNS"
+    type: dns
+    host: "example.com"
+    record_type: "A"
+    expected_ip: "not-an-ip"
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error for invalid expected_ip")
+	}
+	if !strings.Contains(err.Error(), "not a valid IPv4 address") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_InvalidCheckType(t *testing.T) {
+	data := []byte(`
+checks:
+  - name: "Acme Bad Type"
+    type: "ftp"
+    url: "ftp://example.com"
+`)
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("expected validation error for invalid check type")
+	}
+	if !strings.Contains(err.Error(), "invalid check type") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

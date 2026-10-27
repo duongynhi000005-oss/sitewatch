@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -85,7 +86,11 @@ type StatusPage struct {
 // Config.Defaults at load time (see applyDefaults).
 type Check struct {
 	Name          string   `yaml:"name"`
+	Type          string   `yaml:"type"`
 	URL           string   `yaml:"url"`
+	Host          string   `yaml:"host"`
+	ExpectedIP    string   `yaml:"expected_ip"`
+	RecordType    string   `yaml:"record_type"`
 	Interval      Duration `yaml:"interval"`
 	Timeout       Duration `yaml:"timeout"`
 	ExpectStatus  int      `yaml:"expected_status"`
@@ -93,6 +98,14 @@ type Check struct {
 	MaxResponseMS int      `yaml:"max_response_ms"`
 	SSLWarnDays   int      `yaml:"ssl_warn_days"`
 	FailThreshold int      `yaml:"fail_threshold"`
+}
+
+// Target returns the primary address or URL being monitored by the check.
+func (c Check) Target() string {
+	if c.Type == "dns" && c.Host != "" {
+		return c.Host
+	}
+	return c.URL
 }
 
 // Config is the fully parsed and defaulted contents of sitewatch.yaml.
@@ -159,6 +172,12 @@ func Parse(data []byte) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	for i := range cfg.Checks {
 		c := &cfg.Checks[i]
+		if c.Type == "" {
+			c.Type = "http"
+		}
+		if c.Type == "dns" && c.RecordType == "" {
+			c.RecordType = "A"
+		}
 		if c.Interval == 0 {
 			c.Interval = cfg.Defaults.Interval
 		}
@@ -171,7 +190,7 @@ func applyDefaults(cfg *Config) {
 		if c.SSLWarnDays == 0 {
 			c.SSLWarnDays = cfg.Defaults.SSLWarnDays
 		}
-		if c.ExpectStatus == 0 {
+		if c.ExpectStatus == 0 && c.Type == "http" {
 			c.ExpectStatus = 200
 		}
 	}
@@ -240,20 +259,70 @@ func validate(cfg *Config, doc *yaml.Node) ValidationErrors {
 			seen[c.Name] = i
 		}
 
-		if strings.TrimSpace(c.URL) == "" {
-			errs = append(errs, FieldError{Path: base + ".url", Line: lineOf(doc, "checks", i), Message: "is required"})
-		} else if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
+		switch c.Type {
+		case "http", "dns":
+		default:
 			errs = append(errs, FieldError{
-				Path:    base + ".url",
-				Line:    lineOf(doc, "checks", i, "url"),
-				Message: fmt.Sprintf("must be an absolute http(s) URL (got %q)", c.URL),
+				Path:    base + ".type",
+				Line:    lineOf(doc, "checks", i, "type"),
+				Message: fmt.Sprintf("invalid check type %q (must be http or dns)", c.Type),
 			})
-		} else if u.Scheme != "http" && u.Scheme != "https" {
-			errs = append(errs, FieldError{
-				Path:    base + ".url",
-				Line:    lineOf(doc, "checks", i, "url"),
-				Message: fmt.Sprintf("scheme must be http or https (got %q)", u.Scheme),
-			})
+		}
+
+		if c.Type == "dns" {
+			if strings.TrimSpace(c.Host) == "" {
+				errs = append(errs, FieldError{
+					Path:    base + ".host",
+					Line:    lineOf(doc, "checks", i),
+					Message: "is required for dns checks",
+				})
+			}
+			switch strings.ToUpper(c.RecordType) {
+			case "A", "AAAA", "CNAME":
+			default:
+				errs = append(errs, FieldError{
+					Path:    base + ".record_type",
+					Line:    lineOf(doc, "checks", i, "record_type"),
+					Message: fmt.Sprintf("invalid record_type %q (must be A, AAAA, or CNAME)", c.RecordType),
+				})
+			}
+			if c.ExpectedIP != "" {
+				if strings.ToUpper(c.RecordType) == "A" {
+					ip := net.ParseIP(c.ExpectedIP)
+					if ip == nil || ip.To4() == nil {
+						errs = append(errs, FieldError{
+							Path:    base + ".expected_ip",
+							Line:    lineOf(doc, "checks", i, "expected_ip"),
+							Message: fmt.Sprintf("expected_ip %q is not a valid IPv4 address", c.ExpectedIP),
+						})
+					}
+				} else if strings.ToUpper(c.RecordType) == "AAAA" {
+					ip := net.ParseIP(c.ExpectedIP)
+					if ip == nil || ip.To4() != nil {
+						errs = append(errs, FieldError{
+							Path:    base + ".expected_ip",
+							Line:    lineOf(doc, "checks", i, "expected_ip"),
+							Message: fmt.Sprintf("expected_ip %q is not a valid IPv6 address", c.ExpectedIP),
+						})
+					}
+				}
+			}
+		} else {
+			if strings.TrimSpace(c.URL) == "" {
+				errs = append(errs, FieldError{Path: base + ".url", Line: lineOf(doc, "checks", i), Message: "is required"})
+			} else if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
+				errs = append(errs, FieldError{
+					Path:    base + ".url",
+					Line:    lineOf(doc, "checks", i, "url"),
+					Message: fmt.Sprintf("must be an absolute http(s) URL (got %q)", c.URL),
+				})
+			} else if u.Scheme != "http" && u.Scheme != "https" {
+				errs = append(errs, FieldError{
+					Path:    base + ".url",
+					Line:    lineOf(doc, "checks", i, "url"),
+					Message: fmt.Sprintf("scheme must be http or https (got %q)", u.Scheme),
+				})
+			}
 		}
 
 		if c.Interval <= 0 {
@@ -269,7 +338,7 @@ func validate(cfg *Config, doc *yaml.Node) ValidationErrors {
 				Message: "must not be greater than interval",
 			})
 		}
-		if c.ExpectStatus < 100 || c.ExpectStatus > 599 {
+		if c.Type == "http" && (c.ExpectStatus < 100 || c.ExpectStatus > 599) {
 			errs = append(errs, FieldError{
 				Path:    base + ".expected_status",
 				Line:    lineOf(doc, "checks", i, "expected_status"),

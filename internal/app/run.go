@@ -17,6 +17,7 @@ import (
 	"github.com/Ricky1800/sitewatch/internal/checker"
 	"github.com/Ricky1800/sitewatch/internal/clock"
 	"github.com/Ricky1800/sitewatch/internal/config"
+	"github.com/Ricky1800/sitewatch/internal/dnschecker"
 	"github.com/Ricky1800/sitewatch/internal/history"
 	"github.com/Ricky1800/sitewatch/internal/state"
 )
@@ -51,12 +52,13 @@ func RunDaemon(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 
 	d := &daemon{
-		cfg:     cfg,
-		checker: &checker.Checker{Client: &http.Client{}, Clock: clock.Real{}},
-		clock:   clock.Real{},
-		alerts:  alert.NewManager(cfg.Alerts),
-		states:  make(map[string]*state.CheckState),
-		log:     stdout,
+		cfg:        cfg,
+		checker:    &checker.Checker{Client: &http.Client{}, Clock: clock.Real{}},
+		dnsChecker: &dnschecker.Checker{Clock: clock.Real{}},
+		clock:      clock.Real{},
+		alerts:     alert.NewManager(cfg.Alerts),
+		states:     make(map[string]*state.CheckState),
+		log:        stdout,
 	}
 	// Alert delivery errors are reported from many check goroutines at once.
 	var stderrMu sync.Mutex
@@ -75,9 +77,10 @@ func RunDaemon(args []string, stdout, stderr io.Writer) int {
 // daemon holds everything the running scheduler needs, so run() and
 // runCheckLoop() are simple methods rather than a pile of parameters.
 type daemon struct {
-	cfg     *config.Config
-	checker *checker.Checker
-	clock   clock.Clock
+	cfg        *config.Config
+	checker    *checker.Checker
+	dnsChecker *dnschecker.Checker
+	clock      clock.Clock
 	alerts  *alert.Manager
 	log     io.Writer
 
@@ -155,18 +158,28 @@ func (d *daemon) scheduleCheck(ctx context.Context, chk config.Check) {
 // runOnce performs a single probe, feeds it through the state machine, and
 // dispatches any resulting alert, then appends the result to history.
 func (d *daemon) runOnce(ctx context.Context, chk config.Check) {
-	res := d.checker.Check(ctx, chk)
+	var res checker.Result
+	if chk.Type == "dns" {
+		dns := d.dnsChecker
+		if dns == nil {
+			dns = &dnschecker.Checker{Clock: d.clock}
+		}
+		res = dns.Check(ctx, chk)
+	} else {
+		res = d.checker.Check(ctx, chk)
+	}
 	now := d.clock.Now()
 	s := d.stateFor(chk.Name)
 
 	tr := s.Record(res.Success, chk.FailThreshold, now)
+	target := chk.Target()
 	switch tr.Kind {
 	case state.TransitionToDown:
 		d.logf("%s DOWN: %s\n", chk.Name, res.Error)
 		d.alerts.Send(ctx, alert.Event{
 			Kind:             alert.Down,
 			CheckName:        chk.Name,
-			URL:              chk.URL,
+			URL:              target,
 			Time:             now,
 			ConsecutiveFails: tr.ConsecutiveFails,
 			Error:            res.Error,
@@ -176,7 +189,7 @@ func (d *daemon) runOnce(ctx context.Context, chk config.Check) {
 		d.alerts.Send(ctx, alert.Event{
 			Kind:      alert.Up,
 			CheckName: chk.Name,
-			URL:       chk.URL,
+			URL:       target,
 			Time:      now,
 			Downtime:  tr.Downtime,
 		})
@@ -189,7 +202,7 @@ func (d *daemon) runOnce(ctx context.Context, chk config.Check) {
 			d.alerts.Send(ctx, alert.Event{
 				Kind:        alert.SSLExpiry,
 				CheckName:   chk.Name,
-				URL:         chk.URL,
+				URL:         target,
 				Time:        now,
 				SSLExpiry:   *res.TLSExpiry,
 				SSLDaysLeft: daysLeft,
